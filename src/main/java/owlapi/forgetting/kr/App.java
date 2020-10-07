@@ -3,13 +3,20 @@ package owlapi.forgetting.kr;
 import openllet.owlapi.OpenlletReasoner;
 import openllet.owlapi.OpenlletReasonerFactory;
 import openllet.owlapi.explanation.PelletExplanation;
+import openllet.owlapi.explanation.io.manchester.ManchesterSyntaxExplanationRenderer;
+
 import org.semanticweb.owlapi.apibinding.OWLManager;
 import org.semanticweb.owlapi.model.*;
+import org.semanticweb.owlapi.util.*;
+
+import com.clarkparsia.owlapi.explanation.SatisfiabilityConverter;
+
 import org.semanticweb.owlapi.reasoner.NodeSet;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.Set;
 
 public class App {
@@ -71,22 +78,33 @@ public class App {
 		}
 	}
 
+	public static String convertToShort(String str) {
+		return "ex:"+removeLastChars(str, 1);
+	}
+
+	public static String removeLastChars(String str, int chars) {
+		return str.substring(0, str.length() - chars);
+	}
 
 	@SuppressWarnings("deprecation")
 	public static void printAllSubClasses(String ontologyPath) throws OWLOntologyCreationException {
 		OWLOntology ontology = loadOntologyFromPath(ontologyPath);
 		OpenlletReasoner reasoner = OpenlletReasonerFactory.getInstance().createReasoner(ontology);
 
+
+		//SimpleIRIShortFormProvider sp = new SimpleIRIShortFormProvider();
+
 		System.out.println("Printing all subClassOf statements to console");
 		System.out.println("\n");
 		for (final OWLSubClassOfAxiom subClassStatement : ontology.getAxioms(AxiomType.SUBCLASS_OF)){
-			if (subClassStatement.getSuperClass() instanceof OWLClass){
-				NodeSet<OWLClass> superClasses = reasoner.getSuperClasses(subClassStatement.getSubClass(), false);			
-				for (OWLClass superClass : superClasses.getFlattened()) {
-					if(!superClass.isOWLThing() &&  superClass instanceof OWLClass) {
-						System.out.println(subClassStatement.getSubClass() + " rdfs:subClassOf " + superClass);
-					}
-				}		
+			NodeSet<OWLClass> superClasses = reasoner.getSuperClasses(subClassStatement.getSubClass(), false);			
+			for (OWLClass superClass : superClasses.getFlattened()) {
+				if(!superClass.isOWLThing() &&  superClass instanceof OWLClass) {
+					//					IRI sub = IRI.create(subClassStatement.getSubClass().toString());
+					//					IRI parent = IRI.create(superClass.toString());
+					//					System.out.println(convertToShort(sub.getShortForm()) + " rdfs:subClassOf " + convertToShort(parent.getShortForm()));
+					System.out.println(subClassStatement.getSubClass() + " rdfs:subClassOf " + superClass);
+				}
 			}
 		}
 		System.out.println("\n");
@@ -107,14 +125,12 @@ public class App {
 		System.out.println("\n");
 		FileOutputStream fos = new FileOutputStream(subClassFile, false);
 		for (final OWLSubClassOfAxiom subClassStatement : ontology.getAxioms(AxiomType.SUBCLASS_OF)){
-			if (subClassStatement.getSuperClass() instanceof OWLClass){
-				NodeSet<OWLClass> superClasses = reasoner.getSuperClasses(subClassStatement.getSubClass(), false);			
-				for (OWLClass superClass : superClasses.getFlattened()) {
-					if(!superClass.isOWLThing() &&  superClass instanceof OWLClass) {
-						String triple = subClassStatement.getSubClass() + " <http://www.w3.org/2000/01/rdf-schema#subClassOf>  " + superClass + " .";
-						fos.write(triple.getBytes());
-						fos.write(System.lineSeparator().getBytes());
-					}
+			NodeSet<OWLClass> superClasses = reasoner.getSuperClasses(subClassStatement.getSubClass(), false);			
+			for (OWLClass superClass : superClasses.getFlattened()) {
+				if(!superClass.isOWLThing() &&  superClass instanceof OWLClass) {
+					String triple = subClassStatement.getSubClass() + " <http://www.w3.org/2000/01/rdf-schema#subClassOf>  " + superClass + " .";
+					fos.write(triple.getBytes());
+					fos.write(System.lineSeparator().getBytes());
 				}
 			}
 		}
@@ -124,14 +140,14 @@ public class App {
 		fos.close();
 	}
 
-	
+
 	@SuppressWarnings("deprecation")
 	public static void getAllSubsumptionExplanations(String ontologyPath, String subsumptionPath, Boolean save) throws IOException {
 		String parentDir = new File(ontologyPath).getParent(); // parent directory of the ontology location
-		
+
 		OWLOntology ontology = loadOntologyFromPath(ontologyPath);
 		OWLOntology subsumptions = loadOntologyFromPath(subsumptionPath);
-		
+
 		String messageAction = "Printing";
 		if(save == true) {
 			messageAction = "Saving";
@@ -141,6 +157,13 @@ public class App {
 
 		// Starting up the Pellet Explanation module.
 		PelletExplanation.setup();
+
+		// The renderer is used to pretty print clashExplanation
+		final ManchesterSyntaxExplanationRenderer renderer = new ManchesterSyntaxExplanationRenderer();
+
+		// The writer used for the clashExplanation rendered
+		final PrintWriter out = new PrintWriter(System.out);
+		renderer.startRendering(out);
 
 		// Create the reasoner and load the ontology with the open pellet reasoner.
 		OpenlletReasoner reasoner = OpenlletReasonerFactory.getInstance().createReasoner(ontology);
@@ -153,9 +176,9 @@ public class App {
 		for (final OWLSubClassOfAxiom subClassStatement : subsumptions.getAxioms(AxiomType.SUBCLASS_OF)){
 			counter ++ ;
 			if(save == true) {
-				saveExplanationsOfAxiom(explanationsGenerator, subClassStatement.getSubClass(), subClassStatement.getSuperClass(), counter, parentDir);
+				saveExplanationsOfAxiom(explanationsGenerator, renderer, subClassStatement.getSubClass(), subClassStatement.getSuperClass(), counter, parentDir);
 			} else {
-				printExplanationsOfAxiom(explanationsGenerator, subClassStatement.getSubClass(), subClassStatement.getSuperClass(), counter);
+				printExplanationsOfAxiom(explanationsGenerator, renderer, subClassStatement.getSubClass(), subClassStatement.getSuperClass(), counter);
 			}
 		}
 		System.out.println("\n");
@@ -163,39 +186,54 @@ public class App {
 		System.out.println("--------");
 		System.out.println("\n");
 	}
-	
 
-	public static void printExplanationsOfAxiom(PelletExplanation explanationsGenerator, OWLClassExpression subClass, OWLClassExpression superClass, int explanationID){
-		System.out.println("\nComputing explanation for: " + subClass + " rdfs:subClassOf " + superClass);
+
+	public static void printExplanationsOfAxiom(PelletExplanation explanationsGenerator, ManchesterSyntaxExplanationRenderer renderer, OWLClassExpression subClass, OWLClassExpression superClass, int explanationID){
+		//System.out.println("\nComputing explanation for: " + subClass + " rdfs:subClassOf " + superClass);
 		Set<Set<OWLAxiom>> explanations = explanationsGenerator.getSubClassExplanations(subClass, superClass);		
-		for(Set<OWLAxiom> Explanation: explanations) {
-			int counterExp = 0;
-			System.out.println("-> Explanation: #" + explanationID );
-			for (OWLAxiom rule : Explanation) {
-				counterExp++;
-				System.out.println("\t Axiom " + counterExp + ". " + rule.toString());
+		OWLDataFactory df;
+		try {
+			for(Set<OWLAxiom> Explanation: explanations) {
+				//int counterExp = 0;
+				//System.out.println("-> Explanation: #" + explanationID );
+				for (OWLAxiom rule : Explanation) {
+					renderer.render(rule, explanations);
+					//counterExp++;
+					//System.out.println("\t Axiom " + counterExp + ". " + rule.toString());
+				}
 			}
-		}
+			renderer.endRendering();
+		} catch (UnsupportedOperationException | OWLException | IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} 
+
 	}
 
-	
-	
-	public static void saveExplanationsOfAxiom(PelletExplanation explanationsGenerator, OWLClassExpression subClass, OWLClassExpression superClass, int explanationID, String dirPath) throws IOException{
+
+
+	public static void saveExplanationsOfAxiom(PelletExplanation explanationsGenerator, ManchesterSyntaxExplanationRenderer renderer, OWLClassExpression subClass, OWLClassExpression superClass, int explanationID, String dirPath) throws IOException{
 		System.out.println("\nComputing explanation for: " + subClass + " rdfs:subClassOf " + superClass);
 		Set<Set<OWLAxiom>> explanations = explanationsGenerator.getSubClassExplanations(subClass, superClass);		
+		int counterExp = 0;
 		for(Set<OWLAxiom> Explanation: explanations) {
+			counterExp++;
 			int counterRule = 0;
 			System.out.println("-> Explanation #" + explanationID );
-			String fileName = "exp-" + explanationID + ".owl";
+			String fileName = "exp" + explanationID + "-" + counterExp + ".omn";
 			File explanationFile = new File(dirPath+"/" + fileName);
 			explanationFile.createNewFile();
 			FileOutputStream fos = new FileOutputStream(explanationFile, false);
+			String ontologyID = "Ontology(<http://www.example.com/explanation" + explanationID +">";
+			fos.write(ontologyID.getBytes());
+			fos.write(System.lineSeparator().getBytes());
 			for (OWLAxiom rule : Explanation) {
 				counterRule++;
 				System.out.println("\t Axiom " + counterRule + ". " + rule.toString());
 				fos.write(rule.toString().getBytes());
 				fos.write(System.lineSeparator().getBytes());
 			}
+			fos.write(")".getBytes());
 			fos.close();
 		}
 	}
